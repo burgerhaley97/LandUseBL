@@ -52,8 +52,9 @@ ag_raster_2008_maj <- terra::app(cdl_all_years[["2008"]], fun = function(x) {
 # plot the reclassified raster
 plot(ag_raster_2008_maj)
 
-# reclassify into non_ag = 0,  ag = 1, major_ag = 2, and NaN = NaN
-ag_raster_2008_combo <- terra::app(cdl_all_years[["2008"]], fun = function(x) {
+# reclassify into non_ag = 0,  other ag = 1, major_ag = 2, alfalfa = 3,
+# and NaN = NaN
+ag_raster_combo <- terra::app(cdl_all_years, fun = function(x) {
   ifelse(is.nan(x), NaN,
          ifelse(x %in% major_ag, 2,
                 ifelse(x %in% alfalfa, 3,
@@ -261,6 +262,11 @@ ag_raster_all <- terra::app(bl_crop_all, fun = function(x) {
   ifelse(is.nan(x), NaN, ifelse(x %in% ag_mask, 0, 1))
 })
 
+# Define the path where you want to save the file
+file_path <- "Intermediate_rasters/ag_raster_all.tif"
+# Write the SpatRaster to a file
+terra::writeRaster(ag_raster_all, filename = file_path)
+
 # check that raster is compatible with package
 landscapemetrics::check_landscape(ag_raster_all)
 
@@ -298,6 +304,18 @@ ggplot(c_area_metrics, aes(x = as.numeric(year), y = value, color = as.factor(cl
   scale_color_manual(values = c("blue", "green"), labels = class_labels) +
   theme_minimal()
 
+c_area_metrics_sub <- c_area_metrics %>%
+  filter(class %in% 1)
+c_area_metrics_sub
+
+ggplot(c_area_metrics_sub, aes(x = as.numeric(year), y = value, color = as.factor(class))) +
+  geom_line() +
+  labs(title = "Mean Patch Area Over Time",
+       x = "Year",
+       y = "Mean Patch Area in Hectares",
+       color = "Class") +
+  scale_color_manual(values = "green", labels = class_labels) +
+  theme_minimal()
 
 # describes percentage of landscape belonging to each class, measure of
 # composition
@@ -326,7 +344,7 @@ ggplot(pland_metrics, aes(x = as.numeric(year), y = value, fill = as.factor(clas
        x = "Year",
        y = "Percent of Land covered by class",
        fill = "Class") +
-  scale_fill_manual(values = c("green", "blue"), labels = class_labels) +
+  scale_fill_manual(values = c("blue", "green"), labels = class_labels) +
   theme_minimal()
 
 
@@ -400,4 +418,165 @@ class_1 <- test_patch[[1]][[2]]
 
 nn_0 <- get_nearestneighbour(class_0)
 nn_1 <- get_nearestneighbour(class_1)
+sum(nn_1$dist)/nrow(nn_1)
+
+# average distance btw patches is 117.8123 in 2008
+
+###############################################################################
+# Landscape summary of patch level metrics (using BL watershed all years)
+# non ag vs major ag classes
+###############################################################################
+
+# reclassify into non_ag = 0,  other ag = 1, major_ag = 2, alfalfa = 3,
+# and NaN = NaN
+ag_raster_combo <- terra::app(bl_crop_all, fun = function(x) {
+  ifelse(is.nan(x), NaN,
+         ifelse(x %in% major_ag, 2,
+                ifelse(x %in% alfalfa, 3,
+                       ifelse(x %in% ag_mask, 0, 1))))
+})
+
+
+# Define the path where you want to save the file
+file_path <- "Intermediate_rasters/ag_raster_combo.tif"
+# Write the SpatRaster to a file
+terra::writeRaster(ag_raster_combo, filename = file_path)
+
+# check that raster is compatible with package
+landscapemetrics::check_landscape(ag_raster_combo)
+
+# mean area of patches in each class
+# Initialize a list to store landscape metrics for each year
+landscape_metrics_list <- list()
+
+reclassified_raster <- ag_raster_combo
+
+# Calculate landscape metrics for each layer (year)
+for (i in 1:nlyr(reclassified_raster)) {
+  raster_layer <- reclassified_raster[[i]]
+  year <- names(cdl_all_years)[i]
+
+  # Calculate landscape metrics
+  landscape_metrics <- lsm_c_area_mn(raster_layer)
+  landscape_metrics$year <- year
+  landscape_metrics_list[[i]] <- landscape_metrics
+}
+
+# Combine all metrics into a single data frame
+c_area_metrics <- bind_rows(landscape_metrics_list)
+c_area_metrics
+
+# Plot changes in mean patch area over time
+library(ggplot2)
+c_area_metrics_sub <- c_area_metrics %>%
+  filter(class %in% c(1, 2, 3))
+c_area_metrics_sub
+
+
+class_labels <- c("0" = "Non-Ag", "1" = "Ag", "2" = "Major_Ag", "3" = "Alfalfa")
+ggplot(c_area_metrics, aes(x = as.numeric(year), y = value, color = as.factor(class))) +
+  geom_line() +
+  labs(title = "Mean Patch Area Over Time Ag Combo",
+       x = "Year",
+       y = "Mean Patch Area in Hectares",
+       color = "Class") +
+  scale_color_manual(values = c("blue", "green", "red", "orange"), labels = class_labels) +
+  theme_minimal()
+
+class_labels <- c("1" = "Ag", "2" = "Major_Ag", "3" = "Alfalfa")
+ggplot(c_area_metrics_sub, aes(x = as.numeric(year), y = value, color = as.factor(class))) +
+  geom_line() +
+  labs(title = "Mean Patch Area Over Time Ag Combo",
+       x = "Year",
+       y = "Mean Patch Area in Hectares",
+       color = "Class") +
+  scale_color_manual(values = c("green", "red", "orange"), labels = class_labels) +
+  theme_minimal()
+
+# describes percentage of landscape belonging to each class, measure of
+# composition
+# Initialize a list to store landscape metrics for each year
+reclassified_raster <- ag_raster_combo
+
+landscape_metrics_pland_1 <- list()
+
+# Calculate landscape metrics for each layer (year)
+for (i in 1:nlyr(reclassified_raster[[1:8]])) {
+  raster_layer <- reclassified_raster[[1:8]][[i]]
+  year <- names(cdl_all_years)[i]
+
+  # Calculate landscape metrics
+  landscape_metrics <- lsm_c_pland(raster_layer)
+  landscape_metrics$year <- year
+  landscape_metrics_pland_1[[i]] <- landscape_metrics
+}
+
+# Combine all metrics into a single data frame
+pland_metrics_1 <- bind_rows(landscape_metrics_pland_1)
+print(pland_metrics_1, n =32)
+
+landscape_metrics_pland_2 <- list()
+
+# Calculate landscape metrics for each layer (year)
+for (i in 1:nlyr(reclassified_raster[[9:16]])) {
+  raster_layer <- reclassified_raster[[9:16]][[i]]
+  year <- names(cdl_all_years[[9:16]])[i]
+
+  # Calculate landscape metrics
+  landscape_metrics_2 <- lsm_c_pland(raster_layer)
+  landscape_metrics_2$year <- year
+  landscape_metrics_pland_2[[i]] <- landscape_metrics_2
+}
+
+# Combine all metrics into a single data frame
+pland_metrics_2 <- bind_rows(landscape_metrics_pland_2)
+pland_metrics_2
+
+pland_metrics_combo <- bind_rows(pland_metrics_1, pland_metrics_2)
+pland_metrics_combo
+
+# Create the stacked bar plot
+ggplot(pland_metrics_combo, aes(x = as.numeric(year), y = value, fill = as.factor(class))) +
+  geom_bar(stat = "identity", position = "stack") +
+  labs(title = "Percent land Cover",
+       x = "Year",
+       y = "Percent of Land covered by class",
+       fill = "Class") +
+  scale_fill_manual(values = c("blue", "green", "red", "orange"), labels = class_labels) +
+  theme_minimal()
+
+# cohesion of class, this is an aggregation metric that gives info about the
+# configuration of the landscape, used to access if patches of the same class are
+# located next to each other or appear in isolation
+# 0 = if isolated, 100 if cohesion is present (units are percent)
+# Initialize a list to store landscape metrics for each year
+landscape_metrics_coh <- list()
+
+# Calculate landscape metrics for each layer (year)
+for (i in 1:nlyr(reclassified_raster)) {
+  raster_layer <- reclassified_raster[[i]]
+  year <- names(cdl_all_years)[i]
+
+  # Calculate landscape metrics
+  landscape_metrics <- lsm_c_cohesion(raster_layer)
+  landscape_metrics$year <- year
+  landscape_metrics_coh[[i]] <- landscape_metrics
+}
+
+# Combine all metrics into a single data frame
+coh_metrics <- bind_rows(landscape_metrics_coh)
+print(coh_metrics, n =32)
+
+class_labels <- c("0" = "Non-Ag", "1" = "Ag", "2" = "Major_Ag", "3" = "Alfalfa")
+ggplot(coh_metrics, aes(x = as.numeric(year), y = value, color = as.factor(class))) +
+  geom_line() +
+  labs(title = "Patch Cohesion Over Time",
+       x = "Year",
+       y = "Patch Cohesion",
+       color = "Class") +
+  scale_color_manual(values = c("blue", "green", "red", "orange"), labels = class_labels) +
+  theme_minimal()
+
+
+
 
