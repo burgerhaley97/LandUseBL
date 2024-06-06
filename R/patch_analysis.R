@@ -188,6 +188,12 @@ rich_shdi
 bl_crop <- crop(ag_raster_2008_combo, bl_watershed_trans)
 plot(bl_crop)
 
+# Define the path where you want to save the file
+file_path <- "Intermediate_rasters/bl_crop.tif"
+
+# Write the SpatRaster to a file
+terra::writeRaster(bl_crop_all, filename = file_path, overwrite = TRUE)
+
 # check raster
 landscapemetrics::check_landscape(bl_crop)
 plot(bl_crop)
@@ -382,6 +388,27 @@ ggplot(coh_metrics, aes(x = as.numeric(year), y = value, color = as.factor(class
   scale_color_manual(values = c("blue", "green"), labels = class_labels) +
   theme_minimal()
 
+# look at the SIDI "Diversity  metric"
+# Initialize a list to store landscape metrics for each year
+landscape_metrics_sidi <- list()
+
+# Calculate landscape metrics for each layer (year)
+for (i in 1:nlyr(reclassified_raster)) {
+  raster_layer <- reclassified_raster[[i]]
+  year <- names(cdl_all_years)[i]
+
+  # Calculate landscape metrics
+  landscape_metrics <- lsm_l_sidi(reclassified_raster)
+  landscape_metrics$year <- year
+  landscape_metrics_sidi[[i]] <- landscape_metrics
+}
+
+# Combine all metrics into a single data frame
+sidi_metrics <- bind_rows(landscape_metrics_sidi)
+sidi_metrics
+
+landscape_metrics_2008 <- lsm_l_sidi(reclassified_raster[["2008"]])
+landscape_metrics_2023 <- lsm_l_sidi(reclassified_raster[["2023"]])
 
 # Initialize a list to store landscape metrics for each year
 landscape_metrics_patch <- list()
@@ -392,27 +419,29 @@ for (i in 1:nlyr(reclassified_raster)) {
   year <- names(cdl_all_years)[i]
 
   # Calculate landscape metrics
-  landscape_metrics <- get_patches(raster_layer, to_disk = TRUE,
-                                    return_raster = TRUE)
+  landscape_metrics <- get_patches(raster_layer, class = 1, to_disk = TRUE)
   landscape_metrics$year <- year
   landscape_metrics_patch[[i]] <- landscape_metrics
 }
 
 # Combine all metrics into a single data frame
-enn_metrics <- bind_rows(landscape_metrics_enn)
-enn_metrics
+plot(landscape_metrics_patch[[08]]$layer_1$class_1)
 
 
 test_patch <- landscapemetrics::get_patches(reclassified_raster[["2008"]], directions = 8, to_disk = TRUE)
 plot(test_patch$layer_1$class_0)
 plot(test_patch$layer_1$class_1)
 
+
+test_patch_2023 <- landscapemetrics::get_patches(reclassified_raster[["2023"]], directions = 8, to_disk = TRUE)
+plot(test_patch_2023$layer_1$class_0)
+plot(test_patch_2023$layer_1$class_1)
+
 # count patches
 nrow(terra::unique(test_patch[[1]][[1]]))
 nrow(terra::unique(test_patch[[1]][[2]]))
 
 # calculate nearest neighbor
-
 class_0 <- test_patch[[1]][[1]]
 class_1 <- test_patch[[1]][[2]]
 
@@ -536,6 +565,7 @@ pland_metrics_combo <- bind_rows(pland_metrics_1, pland_metrics_2)
 pland_metrics_combo
 
 # Create the stacked bar plot
+class_labels <- c("0" = "Non-Ag", "1" = "Ag", "2" = "Major_Ag", "3" = "Alfalfa")
 ggplot(pland_metrics_combo, aes(x = as.numeric(year), y = value, fill = as.factor(class))) +
   geom_bar(stat = "identity", position = "stack") +
   labs(title = "Percent land Cover",
@@ -577,6 +607,114 @@ ggplot(coh_metrics, aes(x = as.numeric(year), y = value, color = as.factor(class
   scale_color_manual(values = c("blue", "green", "red", "orange"), labels = class_labels) +
   theme_minimal()
 
+# look at patch dominance index "largest patch index"
+landscape_metrics_lpi <- list()
+
+# Calculate landscape metrics for each layer (year)
+for (i in 1:nlyr(reclassified_raster)) {
+  raster_layer <- reclassified_raster[[i]]
+  year <- names(cdl_all_years)[i]
+
+  # Calculate landscape metrics
+  landscape_metrics <- lsm_c_lpi(raster_layer)
+  landscape_metrics$year <- year
+  landscape_metrics_lpi[[i]] <- landscape_metrics
+}
+
+# Combine all metrics into a single data frame
+lpi_metrics <- bind_rows(landscape_metrics_lpi)
+lpi_metrics
+lpi_metrics_sub <- lpi_metrics %>%
+  filter(class %in% c(1, 2, 3))
+lpi_metrics_sub
+
+class_labels <- c("0" = "Non-Ag", "1" = "Ag", "2" = "Major_Ag", "3" = "Alfalfa")
+ggplot(lpi_metrics, aes(x = as.numeric(year), y = value, color = as.factor(class))) +
+  geom_line() +
+  labs(title = "Largest Patch Size by Class",
+       x = "Year",
+       y = " Patch Size in Hectares",
+       color = "Class") +
+  scale_color_manual(values = c("blue", "green", "red", "orange"), labels = class_labels) +
+  theme_minimal()
+
+class_labels <- c("1" = "Ag", "2" = "Major_Ag", "3" = "Alfalfa")
+ggplot(lpi_metrics_sub, aes(x = as.numeric(year), y = value, color = as.factor(class))) +
+  geom_line() +
+  labs(title = "Largest Patch Size by Class",
+       x = "Year",
+       y = " Patch Size in Hectares",
+       color = "Class") +
+  scale_color_manual(values = c("green", "red", "orange"), labels = class_labels) +
+  theme_minimal()
+
+##############################################################################
+#                              Gifs of both reclass rasters
+##############################################################################
 
 
+#------------------------- Save these plots as a GIF -------------------------#
+# add gif of non ag vs ag pixels over time
+# Define the years
+years <- 2008:2023
+
+# Directory to save the images
+dir.create("plots")
+
+# Loop through each layer, plot, and save as PNG
+for (i in 1:nlyr(ag_raster_all)) {
+  layer <- ag_raster_all[[i]]  # Extract the i-th layer
+  year <- years[i]  # Corresponding year
+  plot_title <- paste("Year:", year)
+
+  # Create the plot and save it as a PNG file
+  png_filename <- paste0("plots/plot_", year, ".png")
+  png(png_filename)
+  plot(layer, main = plot_title, col = c("blue", "green"), legend = FALSE)
+  dev.off()
+}
+
+# Create a GIF from the PNG files
+png_files <- list.files("plots", pattern = "plot_.*\\.png", full.names = TRUE)
+gif <- image_read(png_files)
+gif <- image_animate(gif, fps = 1) # Set frames per second
+
+# Save the GIF
+image_write(gif, "plots/animation.gif")
+
+# Clean up
+unlink("plots", recursive = TRUE)
+
+
+#------------------------- Save these plots as a GIF -------------------------#
+# add gif of non ag vs ag pixels over time
+# Define the years
+years <- 2008:2023
+
+# Directory to save the images
+dir.create("plots")
+
+# Loop through each layer, plot, and save as PNG
+for (i in 1:nlyr(ag_raster_combo)) {
+  layer <- ag_raster_combo[[i]]  # Extract the i-th layer
+  year <- years[i]  # Corresponding year
+  plot_title <- paste("Year:", year)
+
+  # Create the plot and save it as a PNG file
+  png_filename <- paste0("plots/plot_", year, ".png")
+  png(png_filename)
+  plot(layer, main = plot_title, col = c("blue", "green", "red", "orange"), legend = FALSE)
+  dev.off()
+}
+
+# Create a GIF from the PNG files
+png_files <- list.files("plots", pattern = "plot_.*\\.png", full.names = TRUE)
+gif <- image_read(png_files)
+gif <- image_animate(gif, fps = 1) # Set frames per second
+
+# Save the GIF
+image_write(gif, "plots/animation.gif")
+
+# Clean up
+unlink("plots", recursive = TRUE)
 

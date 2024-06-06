@@ -121,7 +121,7 @@ for (i in 1:nlyr(ag_raster_all)) {
   # Create the plot and save it as a PNG file
   png_filename <- paste0("plots/plot_", year, ".png")
   png(png_filename)
-  plot(layer, main = plot_title, col = c("white", "black"), legend = FALSE)
+  plot(layer, main = plot_title, col = c("blue", "green"), legend = FALSE)
   dev.off()
 }
 
