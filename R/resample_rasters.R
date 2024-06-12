@@ -80,7 +80,7 @@ simulate_raster_changes <- function(input_raster, target_value,
 set.seed(47)  # For reproducibility
 simulation_results <- simulate_raster_changes(county_crop, target_value = 0,
                                   prob_transition = 0.1, prob_0 = 0.7,
-                                  prob_1 = 0.3, n_simulations = 1000)
+                                  prob_1 = 0.3, n_simulations = 100)
 
 simulation_results_1 <- simulate_raster_changes(county_crop, target_value = 0,
                                               prob_transition = 0.1, prob_0 = 0.7,
@@ -222,6 +222,13 @@ file_path <- "Intermediate_rasters/simulation_results_bl.tif"
 # Write the SpatRaster to a file
 terra::writeRaster(simulation_results_bl, filename = file_path)
 
+# Run the simulation for
+set.seed(47)  # For reproducibility
+simulation_results <- simulate_raster_changes(, target_value = 0,
+                                              prob_transition = 0.1, prob_0 = 0.7,
+                                              prob_1 = 0.3, n_simulations = 100)
+
+
 
 
 # try getting mean patch area distribution on sim data
@@ -293,8 +300,56 @@ hist(c_area_metrics_sub$value, breaks = 20,
      main = "Distribution of Mn Patch Size from Class 0 \n After 100 Simulations",
      xlab = "number of cells", ylab = "Prob", freq = FALSE, probability = TRUE)
 
+# Function to count pixels and plot distribution by layer and class
+count_pixels_and_plot_histogram <- function(spatraster) {
+  # Check if input is a SpatRaster object
+  if (!inherits(spatraster, "SpatRaster")) {
+    stop("The input must be a SpatRaster object.")
+  }
 
-# cores cells labeled as 1, edges labeled as 0
+  # Get unique classes and their counts for each layer
+  class_counts <- lapply(1:nlyr(spatraster), function(i) {
+    layer <- spatraster[[i]]
+    freq(layer)
+  })
+
+  # Combine counts from all layers and add layer information
+  combined_counts <- do.call(rbind, lapply(seq_along(class_counts), function(i) {
+    cbind(Layer = i, class_counts[[i]])
+  }))
+
+  # Convert to a data frame
+  combined_counts <- as.data.frame(combined_counts)
+  colnames(combined_counts) <- c("Layer", "Class", "Count")
+
+  return(combined_counts)
+}
+# Call the function with the example SpatRaster object
+counts <- count_pixels_and_plot_histogram(simulation_results_bl)
+class(counts)
+colnames(counts) <- c("Layer", "Sub_layer", "Class", "Count")
+
+
+counts_sub <- counts %>%
+  filter(Class %in% 1)
+
+
+hist(counts_sub$Count, probability = TRUE, main = "Class 1 pixel counts per layer")
+
+
+counts_sub <- counts %>%
+  filter(Class %in% 0)
+
+
+hist(counts_sub$Count, probability = TRUE, main = "Class 0 pixel counts per layer")
+
+
+
+
+
+
+# cores cells labeled as 1, edges labeled as 0 ?
+# need to check this
 
 cores <- show_cores(county_crop, class = 1, directions = 4)
 cores$layer_1
@@ -305,11 +360,14 @@ sum(cores$layer_1$data$core_label)
 unique(cores$layer_1$data$values)
 
 
-cores <- show_cores(ag_raster_all[["2008"]], class = 1, directions = 4)
+cores <- show_cores(ag_raster_all[["2008"]], class = 1)
 cores$layer_1
 sum(cores$layer_1$data$values == 1)
 sum(cores$layer_1$data$values == 0)
 sum(cores$layer_1$data$core_label)
 
+color_map <- c("red", "blue")
+names(color_map) <- 0:1
+plot(cores$layer_1, col = color_map)
 
-
+core_area <- lsm_p_core(county_crop)
