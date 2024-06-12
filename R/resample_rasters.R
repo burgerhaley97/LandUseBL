@@ -276,3 +276,40 @@ ggplot(c_area_metrics_sub, aes(x = as.numeric(sim_number), y = value, color = as
   scale_color_manual(values = "green", labels = class_labels) +
   theme_minimal()
 
+
+# Display the results
+
+c_area_metrics_sub <- c_area_metrics %>%
+  filter(class %in% 1)
+c_area_metrics_sub
+hist(c_area_metrics_sub$value, breaks = 20,
+     main = "Distribution of Mn Patch Size from Class 1 \n After 100 Simulations",
+     xlab = "(simulation cell number/actual cell number) * 100", ylab = "Prob", probability = TRUE)
+
+c_area_metrics_sub <- c_area_metrics %>%
+  filter(class %in% 0)
+c_area_metrics_sub
+hist(c_area_metrics_sub$value, breaks = 20,
+     main = "Distribution of Mn Patch Size from Class 0 \n After 100 Simulations",
+     xlab = "number of cells", ylab = "Prob", freq = FALSE, probability = TRUE)
+
+
+# cores cells labeled as 1, edges labeled as 0
+
+cores <- show_cores(county_crop, class = 1, directions = 4)
+cores$layer_1
+sum(cores$layer_1$data$values == 1)
+sum(cores$layer_1$data$values == 0)
+sum(cores$layer_1$data$core_label)
+
+unique(cores$layer_1$data$values)
+
+
+cores <- show_cores(ag_raster_all[["2008"]], class = 1, directions = 4)
+cores$layer_1
+sum(cores$layer_1$data$values == 1)
+sum(cores$layer_1$data$values == 0)
+sum(cores$layer_1$data$core_label)
+
+
+
