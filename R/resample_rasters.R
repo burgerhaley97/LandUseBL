@@ -1,18 +1,45 @@
 # Install and load necessary package
 library(terra)
+library(tigris)
+library(sf)
+library(dplyr)
+
+##############################################################################
+#             Prepare Aggregated Data for Simulation
+##############################################################################
 
 # try with just a bounding box around bear lake county ID, terra::values()
 # needs more memory than I have for the whole raster
-
 BL_county <- tigris::counties(state = "ID", cb = TRUE) %>%
   st_as_sf() %>%
   filter(NAME %in% "Bear Lake")
 class(BL_county)
 
-BL_county <- st_transform(BL_county, crs = st_crs(ag_raster_2008))
-county_crop <- crop(ag_raster_2008, BL_county)
+bl_crop <- rast("Intermediate_rasters/bl_crop.tif")
+
+# Aggregate at 90 meter resolution
+bl_90_all <- terra::aggregate(bl_crop, fact = 3, fun = "modal")
+
+# reclassify data for Ag vs Non-ag
+
+# Non-ag values
+ag_mask <- c(61:65, 81:83, 87:88, 92, 111:112, 121:124,
+             131, 141:143, 152, 176, 181, 190, 195)
+
+# Reclassify the raster values into non-ag = 0, ag = 1, and NaN = NaN
+ag_raster_90 <- terra::app(bl_90_all, fun = function(x) {
+  ifelse(is.nan(x), NaN, ifelse(x %in% ag_mask, 0, 1))
+})
+
+BL_county <- st_transform(BL_county, crs = st_crs(ag_raster_90))
+county_crop <- crop(ag_raster_90[["2008"]], BL_county)
 plot(county_crop)
 
+
+
+##############################################################################
+#             Start with just simulating one value
+##############################################################################
 
 # Function to randomly select a percentage of pixels with a specific value and
 # changes their values based on specified probabilities
@@ -182,6 +209,7 @@ simulate_raster_changes <- function(input_raster, target_values, prob_transition
   result_files <- character(n_simulations)
 
   for (i in 1:n_simulations) {
+
     # Apply the function to get the modified raster
     modified_raster <- randomly_select_pixels(input_raster, target_values, prob_transitions, prob_0s, prob_1s)
 
@@ -371,3 +399,162 @@ names(color_map) <- 0:1
 plot(cores$layer_1, col = color_map)
 
 core_area <- lsm_p_core(county_crop)
+
+##############################################################################
+#                   Simulate Using Terra App Function
+##############################################################################
+
+
+# Function to preprocess raster to handle NaN values
+# Show cores can't handle NaN or Na values from background raster so need to
+# change to arbitrary value (5)
+preprocess_raster <- function(raster) {
+  values(raster)[is.nan(values(raster))] <- 5
+  return(raster)
+}
+Na_raster <- preprocess_raster(ag_raster_90[["2008"]])
+
+## STEP 1: ID edge pixels
+# Function to identify and tag edges
+tag_edges <- function(raster, edge_depth = 1) {
+  # Identify core areas
+  core_areas <- show_cores(raster, edge_depth = edge_depth, class = c(0,1))
+
+  # Convert core_areas data to a matrix and filter for edge values
+  core_data <- core_areas$layer_1$data
+
+  # Initialize a new raster to tag edges and cores
+  tagged_raster <- raster
+
+  # Get cell indices for the edge coordinates
+  edge_coords_class_0 <- core_data[core_data$class == 0 & core_data$values == 0, c("x", "y")]
+  edge_coords_class_1 <- core_data[core_data$class == 1 & core_data$values == 0, c("x", "y")]
+
+  edge_cells_class_0 <- cellFromXY(raster, as.matrix(edge_coords_class_0))
+  edge_cells_class_1 <- cellFromXY(raster, as.matrix(edge_coords_class_1))
+
+  # Tag edges for class 0 as 2
+  tagged_raster[edge_cells_class_0] <- 2
+
+  # Tag edges for class 1 as 3
+  tagged_raster[edge_cells_class_1] <- 3
+
+  return(tagged_raster)
+}
+
+test_tag <- tag_cores_edges(Na_raster)
+plot(test_tag)
+
+core_test <- show_cores(Na_raster, class = c(0,1))
+core_test
+
+## STEP 2: Change class of pixels based on transition probability
+
+# Difference in transition values? (accuracy of classification at 90 meter res?)
+# Potentially could rewrite transition_pixels in RCPP to speed things up as
+# suggested from the terra::app documentation
+# Vectorized function to change 10% of cells with value 1 to 0 and 30% of other
+# cells to 1
+transition_pixels <- function(pixel_values) {
+
+  # Change 30% of Ag pixels to Non-ag (0 value)
+  pixel_values[pixel_values == 3 & runif(sum(pixel_values == 3)) < 0.3] <- 0
+
+  # Change 10% of Non-Ag pixels to Ag (1 value)
+  pixel_values[pixel_values == 2 & runif(sum(pixel_values == 2)) < 0.1] <- 6
+
+  return(pixel_values)
+
+}
+
+# Vectorized function to process a SpatRaster with multiple layers
+process_raster <- function(raster) {
+  # Check if the input is a SpatRaster
+  if (class(raster) == "SpatRaster") {
+    # Apply the transition_pixels function to each cell of the raster
+    processed_raster <- app(raster, transition_pixels)
+    return(processed_raster)
+  } else {
+    stop("The input is not a SpatRaster object.")
+  }
+
+}
+
+
+## STEP 3: Run the simulation
+
+# Function to simulate raster changes over multiple years/layers
+# see if I can remove the part where I replicate the raster and instead just
+# reuse the the same input raster??
+simulate_raster_changes <- function(input_raster, n_simulations = 100) {
+
+  # Replicate the input raster n_simulations times
+  stacked_rasters <- do.call(c, replicate(n_simulations, input_raster, simplify = FALSE))
+
+  # Apply the transition function to each layer in the stack
+  output_rasters <- process_raster(stacked_rasters)
+
+  return(output_rasters)
+}
+
+# Run the simulation
+output_raster <- simulate_raster_changes(test_tag, n_simulations = 100)
+plot(output_raster)
+
+# Measure the time taken to process the raster
+time_taken <- system.time({
+  # Run the simulation
+  output_raster <- simulate_raster_changes(test_tag, n_simulations = 100)
+})
+
+# Print the time taken
+# 343.86
+# took around 5.7 minutes to simulate bl area 100 times
+print(time_taken)
+
+
+plot(output_raster[[1:10]])
+
+# Define a custom color palette for the categorical values
+custom_colors <- c("blue", "lightgreen", "red", "yellow", "gray")
+
+# Plot the SpatRaster with custom colors
+plot(output_raster[[1]], col = custom_colors, legend = TRUE)
+
+# Add a legend with custom labels
+legend("bottomright", legend = c("Non-ag", "Ag", "Non-ag-Edge", "Ag-Edge", "background"), fill = custom_colors)
+
+###############################################################################
+# Figure out how to get the values of the k nearest neighbors for the edge cells
+
+# test this out with the county crop raster to start
+tag_crop <- tag_cores_edges(county_crop)
+
+# Run the simulation
+# define intermediate value that tagged cells can be identified as (6)
+crop_raster <- simulate_raster_changes(tag_crop, n_simulations = 5)
+plot(crop_raster[[1]])
+crop_raster_sub <- crop_raster[[1]]
+
+# get a vector of the tagged edge cells that I want to transition
+# (small percent of actual edge cells)
+# Specify the value you're interested in
+specific_value <- 6
+
+# Get the cell numbers of cells with the specific value
+cells_of_interest <- which(values(crop_raster_sub) == specific_value)
+
+# Find the indices of the 4 nearest neighbors for each cell of interest
+neighbors <- adjacent(crop_raster_sub, cells=cells_of_interest, directions="rook")
+
+# Get the cell indices of the neighbors
+neighbor_indices <- neighbors[,2]
+
+
+# Extract the values of the nearest neighbors using values()
+neighbor_values <- values(crop_raster_sub)[neighbor_indices]
+
+
+# Combine the cell indices and their values
+results <- data.frame(cell = neighbor_indices, value = neighbor_values)
+print(results)
